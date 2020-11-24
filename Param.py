@@ -3,24 +3,24 @@ import torch
 from torchvision import transforms as transf
 import numpy as np
 
-BATCH_SIZE = 32
-LEARNING_RATE = 1e-2
-GAMMA = 0.99
-EPS = 0.1
-MEMORY_SIZE = 4096
-UPDATE = 16
-IMG_SIZE = [120, 120]
-NUM_EPISODE = 100
+BATCH_SIZE = 48
+LEARNING_RATE = 1e-3
+GAMMA = 0.5
+EPS = 0.9
+EPS_DECAY = 0.999
+MEMORY_SIZE = 1024
+UPDATE = 10
+IMG_SIZE = [72, 72]
+NUM_EPISODE = 300
+DEBUG = False
 
 def get_env(name = 'CartPole-v0'):
     env = gym.make(name)
-    # env = gym.wrappers.Monitor(env, directory=OUTDIR, force=True)
     env.reset()
     return env
 
-if torch.cuda.is_available():
+if torch.cuda.is_available() and not DEBUG:
     device = torch.device("cuda")
-    # device = torch.device("cpu")
     print("Using CUDA")
 else:
     device = torch.device("cpu")
