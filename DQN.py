@@ -5,30 +5,34 @@ import random
 import torch
 
 class DQN(object):
-    def __init__(self, capacity, env):
+    def __init__(self, capacity, env, eps_sche):
         self.memory = Memory.Memory(capacity)
+        self.eps_scheduler = eps_sche
 
         screen = Param.get_screen(env)
-        _, _, h, w = screen.shape
+        _, h, w = screen.shape
         self.num_act = env.action_space.n
-        self.policy = Net.ResNet(h, w, self.num_act).to(Param.device)
-        self.target = Net.ResNet(h, w, self.num_act).to(Param.device)
+        self.policy = Net.FCN(h, w, self.num_act).to(Param.device)
+        self.state_based = False
         # self.policy = Net.FullyConnected(env.observation_space.shape[0], self.num_act).to(Param.device)
-        # self.target = Net.FullyConnected(env.observation_space.shape[0], self.num_act).to(Param.device)
-        self.target.load_state_dict(self.policy.state_dict())
-        self.target.train(False)
+        # self.state_based = True
 
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=Param.LEARNING_RATE, weight_decay=0.01)
+        self.optimizer = torch.optim.Adam(
+            self.policy.parameters(),
+            lr=Param.LEARNING_RATE,
+            weight_decay=0.001,
+            amsgrad=True
+        )
         self.step = 0
-        self.eps = Param.EPS
 
-    def get_action(self, state):
+    def get_action(self, state, training=True):
         r = random.random()
-        if(r < self.eps):
+        eps = self.eps_scheduler.eps
+        if(r < eps and training):
             return torch.tensor([random.randrange(self.num_act)], device=Param.device, dtype=torch.long)
         else:
             with torch.no_grad():
-                return self.policy(state).max(1)[1]
+                return self.policy(state.to(Param.device)).max(1)[1]
     
     def push(self, val): # val should be [state, action, next_state, reward]
         self.memory.push(val)
@@ -37,25 +41,41 @@ class DQN(object):
         if(len(self.memory) < Param.BATCH_SIZE):
             return
         batch = self.memory.sample(Param.BATCH_SIZE)
-        states = torch.cat([v[0] for v in batch])
-        actions = [[v[1]] for v in batch]
-        with torch.no_grad():
-            y = [[v[3] if v[2] is None else (v[3]+Param.GAMMA * self.target(v[2]).max(1)[0])] for v in batch]
+
+        if self.state_based:
+            states = torch.tensor([v[0] for v in batch], dtype=torch.float32, device=Param.device)
+            next_states = torch.tensor([v[2] for v in batch if v[2] is not None], dtype=torch.float32, device=Param.device)
+        else:
+            states = torch.stack([v[0] for v in batch], 0).to(Param.device)
+            next_states = torch.stack([v[2] for v in batch if v[2] is not None], 0).to(Param.device)
+
+        actions = torch.tensor([[v[1]] for v in batch], dtype=torch.long, device=Param.device)
+        if_nonterm_mask = [[v[2] is not None] for v in batch]
+        if_nonterm_mask = torch.tensor(if_nonterm_mask, dtype=torch.bool, device=Param.device)
+        rewards = torch.tensor([[v[3]] for v in batch], dtype=torch.float32, device=Param.device)
+
+        next_action_values = torch.zeros_like(rewards).to(Param.device)
+        next_action_values[if_nonterm_mask] = self.policy(next_states).max(1)[0]
+
+        y = rewards + next_action_values * Param.GAMMA
+        
+        # with torch.no_grad():
+        #     y = [[v[3] if v[2] is None else (v[3]+Param.GAMMA * self.policy(torch.tensor([v[2]], dtype=torch.float32)).detach().max(1)[0])] for v in batch]
+        #     y = torch.tensor(y, dtype=torch.float32)
+        # Wrong: grad could not be backwarded to self.policy through y
 
         self.optimizer.zero_grad()
-        Q_sa = self.policy(states).gather(1, torch.tensor(actions, device=Param.device))
-        loss = torch.nn.functional.l1_loss(Q_sa, torch.tensor(y, device=Param.device))
+        Q_sa = self.policy(states).gather(1, actions)
+        loss = torch.nn.functional.l1_loss(Q_sa, y)
         loss.backward()
         self.optimizer.step()
 
         self.step += 1
-        if(self.step % Param.UPDATE == 0):
-            print('Update Network')
-            self.update()
-        self.eps *= Param.EPS_DECAY
-        if(self.eps < 0.05):
-            self.eps = 0.05
+        self.eps_scheduler.update()
         return loss
-
-    def update(self):
-        self.target.load_state_dict(self.policy.state_dict())
+    
+    def save(self, pos):
+        torch.save(self.policy.state_dict(), pos)
+    
+    def restore(self, pos):
+        self.policy.load_state_dict(torch.load(pos))

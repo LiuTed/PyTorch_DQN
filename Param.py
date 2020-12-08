@@ -3,16 +3,17 @@ import torch
 from torchvision import transforms as transf
 import numpy as np
 
-BATCH_SIZE = 48
-LEARNING_RATE = 1e-3
-GAMMA = 0.5
-EPS = 0.9
-EPS_DECAY = 0.999
-MEMORY_SIZE = 1024
-UPDATE = 10
+BATCH_SIZE = 32
+LEARNING_RATE = 3e-3
+GAMMA = 0.9
+MEMORY_SIZE = 100000
+UPDATE = 20
 IMG_SIZE = [72, 72]
-NUM_EPISODE = 300
+NUM_EPISODE = 100
+STEP_PER_EPISODE = 10000
 DEBUG = False
+TEST_EPISODE = 100
+DO_TEST_EVERY_LOOP = 20
 
 def get_env(name = 'CartPole-v0'):
     env = gym.make(name)
@@ -32,5 +33,5 @@ def get_screen(env):
     screen = torch.from_numpy(screen.astype(np.float32) / 255)
     screen = transf.ToPILImage()(screen)
     screen = transf.Resize(IMG_SIZE)(screen)
-    screen = transf.ToTensor()(screen).view(1, 3, IMG_SIZE[0], IMG_SIZE[1])
-    return screen.to(device)
+    screen = transf.ToTensor()(screen).view(3, IMG_SIZE[0], IMG_SIZE[1])
+    return screen
