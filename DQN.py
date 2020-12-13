@@ -12,10 +12,15 @@ class DQN(object):
         screen = Param.get_screen(env)
         _, h, w = screen.shape
         self.num_act = env.action_space.n
-        self.policy = Net.FCN(h, w, self.num_act).to(Param.device)
-        self.state_based = False
-        # self.policy = Net.FullyConnected(env.observation_space.shape[0], self.num_act).to(Param.device)
-        # self.state_based = True
+        # self.policy = Net.FCN(h, w, self.num_act).to(Param.device)
+        # self.target = Net.FCN(h, w, self.num_act).to(Param.device)
+        # self.state_based = False
+        self.policy = Net.FullyConnected(env.observation_space.shape[0], self.num_act).to(Param.device)
+        self.target = Net.FullyConnected(env.observation_space.shape[0], self.num_act).to(Param.device)
+        self.state_based = True
+        
+        self.target.load_state_dict(self.policy.state_dict())
+        self.target.train(False)
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
@@ -50,19 +55,21 @@ class DQN(object):
             next_states = torch.stack([v[2] for v in batch if v[2] is not None], 0).to(Param.device)
 
         actions = torch.tensor([[v[1]] for v in batch], dtype=torch.long, device=Param.device)
-        if_nonterm_mask = [[v[2] is not None] for v in batch]
-        if_nonterm_mask = torch.tensor(if_nonterm_mask, dtype=torch.bool, device=Param.device)
-        rewards = torch.tensor([[v[3]] for v in batch], dtype=torch.float32, device=Param.device)
 
-        next_action_values = torch.zeros_like(rewards).to(Param.device)
-        next_action_values[if_nonterm_mask] = self.policy(next_states).max(1)[0]
+        #version 1
+        # if_nonterm_mask = [[v[2] is not None] for v in batch]
+        # if_nonterm_mask = torch.tensor(if_nonterm_mask, dtype=torch.bool, device=Param.device)
+        # rewards = torch.tensor([[v[3]] for v in batch], dtype=torch.float32, device=Param.device)
 
-        y = rewards + next_action_values * Param.GAMMA
+        # next_action_values = torch.zeros_like(rewards).to(Param.device)
+        # next_action_values[if_nonterm_mask] = self.target(next_states).max(1)[0]
+
+        # y = rewards + next_action_values * Param.GAMMA
         
-        # with torch.no_grad():
-        #     y = [[v[3] if v[2] is None else (v[3]+Param.GAMMA * self.policy(torch.tensor([v[2]], dtype=torch.float32)).detach().max(1)[0])] for v in batch]
-        #     y = torch.tensor(y, dtype=torch.float32)
-        # Wrong: grad could not be backwarded to self.policy through y
+        #version 2
+        with torch.no_grad():
+            y = [[v[3] if v[2] is None else (v[3]+Param.GAMMA * self.target(torch.tensor([v[2]], dtype=torch.float32)).detach().max(1)[0])] for v in batch]
+            y = torch.tensor(y, dtype=torch.float32)
 
         self.optimizer.zero_grad()
         Q_sa = self.policy(states).gather(1, actions)
@@ -71,6 +78,8 @@ class DQN(object):
         self.optimizer.step()
 
         self.step += 1
+        if(self.step % Param.UPDATE == 0):
+            self.target.load_state_dict(self.policy.state_dict())
         self.eps_scheduler.update()
         return loss
     

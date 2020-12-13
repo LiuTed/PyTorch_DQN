@@ -16,7 +16,7 @@ if __name__ == '__main__':
     dqn.restore('net.pkl')
 
     avgstep = 0    
-    for _ in range(Param.TEST_EPISODE):
+    for i in range(Param.TEST_EPISODE):
         state = env.reset()
         if dqn.state_based:
             state[0] /= 4.8
@@ -46,7 +46,7 @@ if __name__ == '__main__':
             state = next_state
             step += 1
         avgstep += step
-        print(_, step)
+        print(i, step)
     avgstep /= Param.TEST_EPISODE
     print('Average:', avgstep)
     env.close()
